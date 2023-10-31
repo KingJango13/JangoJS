@@ -186,7 +186,7 @@
     }
     window.jango = window.jango || {};
     window.jango.string = EXPORTS;
-})(this);
+})(this || globalThis);
 Number.prototype.toEnglishWord = function(){
     if(this < 0)
         return "Negative " + (-this).toEnglishWord();

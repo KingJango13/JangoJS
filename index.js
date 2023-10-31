@@ -18,4 +18,4 @@
     })().catch(function(error) {
         throw error;
     });
-})(this);
+})(this || globalThis);
