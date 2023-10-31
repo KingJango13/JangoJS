@@ -14,6 +14,8 @@
         await importScript("JStrings");
         await importScript("JMath");
         await importScript("Engineering");
-        await importScript("JObjects")
+        await importScript("JObjects");
+    })().catch(function(error) {
+        throw error;
     });
 })(this);
