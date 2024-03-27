@@ -101,11 +101,30 @@
         }
     };
 
+    function areSamePrototype(obj1, obj2) {
+        return (obj1 instanceof Object.getPrototypeOf(obj2)) && (obj2 instanceof Object.getPrototypeOf(obj1));
+    }
+
+    function objectEquals(obj1, obj2) {
+        if(obj1 === obj2) return true;
+        if(obj1.equals && typeof obj1.equals === "function") return !!obj1.equals(obj2);
+        if(obj2.equals && typeof obj2.equals === "function") return !!obj2.equals(obj1);
+        if(!areSamePrototype(obj1, obj2)) return false;
+        for(let property in obj1) {
+            if(!hasOwn(obj1, property)) continue;
+            if(!hasOwn(obj2, property)) return false;
+            if(!objectEquals(obj1[property], obj2[property])) return false;
+        }
+        return true;
+    }
+
     jango.object = {
         hasOwn,
         Tuple,
         Enum,
-        CallableObject
+        CallableObject,
+        areSamePrototype,
+        objectEquals
     };
 
 //#endregion Objects
@@ -712,6 +731,76 @@
     };
 //#endregion Fraction
 
+    /**
+     * 
+     * @param {(x: number) => number} func 
+     * @param {number} min 
+     * @param {number} max 
+     * @param {number} subIntervalCt 
+     * @param {"LEFT" | "MIDDLE" | "RIGHT"} type 
+     * @returns 
+     */
+    function riemannSum(func, min, max, subIntervalCt, type) {
+        let subIntervalSize = (max - min) / subIntervalCt;
+        let area = 0;
+        for(let i = min; i < max; i += subIntervalSize) {
+            let x = 0;
+            switch(type) {
+                case "LEFT": {
+                    x = i;
+                    break;
+                }
+                case "MIDDLE": {
+                    x = i + (subIntervalSize / 2);
+                    break;
+                }
+                case "RIGHT": {
+                    x = i + subIntervalSize;
+                    break;
+                }
+                default: throw "Unknown Riemann Sum type: " + type;
+            }
+            area += func(x) * subIntervalSize;
+        }
+        return area;
+    }
+
+    /**
+     * 
+     * @param {(x: number) => number} func 
+     * @param {number} min 
+     * @param {number} max 
+     * @param {number} subIntervalCt 
+     * @returns 
+     */
+    riemannSum.left = function(func, min, max, subIntervalCt) {
+        return riemannSum(func, min, max, subIntervalCt, "LEFT");
+    };
+
+    /**
+     * 
+     * @param {(x: number) => number} func 
+     * @param {number} min 
+     * @param {number} max 
+     * @param {number} subIntervalCt 
+     * @returns 
+     */
+    riemannSum.middle = function(func, min, max, subIntervalCt) {
+        return riemannSum(func, min, max, subIntervalCt, "MIDDLE");
+    };
+
+    /**
+     * 
+     * @param {(x: number) => number} func 
+     * @param {number} min 
+     * @param {number} max 
+     * @param {number} subIntervalCt 
+     * @returns 
+     */
+    riemannSum.right = function(func, min, max, subIntervalCt) {
+        return riemannSum(func, min, max, subIntervalCt, "RIGHT");
+    };
+
     jango.math = {
         PI,
         TAU,
@@ -753,7 +842,8 @@
         LinearEquation,
         Point,
         ParabolicEquation,
-        Fraction
+        Fraction,
+        riemannSum
     };
 
 //#endregion Math
@@ -1067,7 +1157,7 @@
 
 //#endregion Engineering
 
-//#region Minecraft
+//#region NBT
 
     const NBTTagType = Object.freeze({
         END: 0,
@@ -1092,15 +1182,12 @@
     }
     /**
      * 
-     * @param {Uint8Array} byteArray
+     * @param {ReadableStream} stream
+     * @param {"gzip" | "deflate" | "deflate-raw"} method
      * @returns {Promise<number[]>}
      */
-    async function gzipDecompress(byteArray) {
-        /**
-         * @type {ReadableStream<Uint8Array>}
-         */
-        let stream = (new Blob(byteArray, {type: "application/zip"})).stream().pipeThrough(new DecompressionStream("gzip"));
-        let reader = stream.getReader();
+    jango.decompressStream = async function(stream, method = "gzip") {
+        let reader = stream.pipeThrough(new DecompressionStream(method)).getReader();
         let bytes = [];
         while(true) {
             let readResult = await reader.read();
@@ -1140,6 +1227,16 @@
         });
         this.value = undefined;
     }
+    NBTTag.prototype.equals = function(other) {
+        if(this.value == other) return true;
+        if(other instanceof NBTTag) return other.equals(this.value);
+        return false;
+    }
+    NBTTag.prototype.equalsStrict = function(other) {
+        if(this.value === other) return true;
+        if(other instanceof NBTTag) return this.type === other.type && other.equalsStrict(this.value);
+        return false;
+    }
     NBTTag.prototype.toByteStream = function() {
         return [];
     }
@@ -1158,7 +1255,7 @@
         if(value instanceof NBTTag) return value.type;
         if(typeof value === "number") {
             if(value === Math.floor(value)) return "INT";
-            return "FLOAT";
+            return "DOUBLE";
         }
         if(typeof value === "string") return "STRING";
         if(Array.isArray(value)) {
@@ -1180,6 +1277,7 @@
      * @param {*} value 
      */
     NBTTag.create = function(type, value) {
+        if(value instanceof NBTTag) return value;
         if(type == null) {
             if(NBTInt.isInt(value)) return new NBTInt(value);
             if(NBTLong.isLong(value)) return new NBTLong(value);
@@ -1213,6 +1311,35 @@
             default: throw "Unknown NBT tag type: " + type +
                 "\nValid types: \"END\", \"BYTE\", \"SHORT\", \"INT\", \"LONG\", \"FLOAT\", \"DOUBLE\", \"BYTE_ARRAY\", \"STRING\", \"LIST\", \"COMPOUND\", \"INT_ARRAY\", \"LONG_ARRAY\", \"SHORT_ARRAY\""
         }
+    }
+    NBTTag.fromNBT = function(value) {
+        if(!NBTTag.isValidNBTTag(value)) throw "Cannot create an NBT tag from an invalid NBT value";
+        if(value instanceof NBTTag) return value;
+        if(typeof value === "number") {
+            if(Number.isInteger(value)) return new NBTInt(value);
+            return new NBTDouble(value);
+        }
+        if(typeof value === "string") {
+            let numberMatch = value.match(/(?<value>\d+(\.\d+)?)(?<type>[BbDdFfLlSs])/);
+            if(numberMatch) {
+                let numVal = Number(numberMatch.groups.value);
+                switch(numberMatch.groups.type.toLowerCase()) {
+                    case "b": return new NBTByte(numVal);
+                    case "s": return new NBTShort(numVal);
+                    case "l": return new NBTLong(numVal);
+                    case "f": return new NBTFloat(numVal);
+                    case "d": return new NBTDouble(numVal);
+                }
+            }
+            return new NBTString(value);
+        }
+        if(Array.isArray(value)) return new NBTList(value);
+        let cmpd = new NBTCompound({});
+        for(let property in value) {
+            if(!hasOwn(value, property)) continue;
+            cmpd.set(property, NBTTag.fromNBT(value[property]));
+        }
+        return cmpd;
     }
 
     /**
@@ -1291,6 +1418,9 @@
     NBTInt.prototype = Object.create(NBTNumberTag.prototype);
     NBTInt.prototype.toByteStream = function() {
         return Uint8Array.of(this.value >> 24, (this.value >> 16) & 0xff, (this.value >> 8) & 0xff, this.value & 0xff);
+    }
+    NBTInt.prototype.toNBT = function() {
+        return this.value;
     }
     NBTInt.isInt = function(value) {
         return isNumberNByteInteger(value, 4);
@@ -1421,6 +1551,24 @@
     }
     NBTArrayTag.prototype.toJSON = function() {
         return this.value.map(x => x.value);
+    }
+    NBTArrayTag.prototype.equals = function(other) {
+        if(this.value == other) return true;
+        if(other instanceof NBTArrayTag) return other.equals(this.value);
+        if(!Array.isArray(other) || this.length !== other.length) return false;
+        for(let i = 0; i < this.length; i++) {
+            if(this.at(i) != other[i]) return false;
+        }
+        return true;
+    }
+    NBTArrayTag.prototype.equalsStrict = function(other) {
+        if(this.value === other) return true;
+        if(other instanceof NBTArrayTag) return this.type === other.type && other.equals(this.value);
+        if(!Array.isArray(other) || this.length !== other.length) return false;
+        for(let i = 0; i < this.length; i++) {
+            if(this.at(i) !== other[i]) return false;
+        }
+        return true;
     }
     NBTArrayTag.isIntegerArray = function(array) {
         if(array instanceof NBTArrayTag) return true;
@@ -1558,6 +1706,16 @@
             throw error;
         }
     }
+    NBTList.prototype[Symbol.iterator] = function*() {
+        for(let i = 0; i < this.length; i++) {
+            yield this.value[i];
+        }
+    }
+    NBTList.prototype.forEach = function(f) {
+        for(let i = 0; i < this.length; i++) {
+            f(this.value[i], i, this);
+        }
+    }
     NBTList.prototype.toByteStream = function() {
         let bytes = [NBTTagType[this.listType]];
         bytes.push.apply(bytes, new NBTInt(this.length).toByteStream());
@@ -1586,6 +1744,21 @@
         }
         return list;
     }
+    NBTList.prototype.equals = function(other) {
+        if(other instanceof NBTList) {
+            if(this.listType !== other.listType) return false;
+            return other.equals(this.value);
+        }
+        if(!Array.isArray(other)) return false;
+        if(this.length !== other.length) return false;
+        for(let i = 0; i < this.length; i++) {
+            if(!this.value[i].equals(other[i])) {
+                console.log("Value %o at index %d does not match the value %o", this.value[i], i, other[i]);
+                return false;
+            }
+        }
+        return true;
+    }
     NBTList.isNBTList = function(list) {
         if(list instanceof NBTList) return true;
         if(!Array.isArray(list)) return false;
@@ -1598,10 +1771,15 @@
         return true;
     }
 
-    function NBTCompound(obj = {}, name = "") {
-        if(!(this instanceof NBTCompound)) return new NBTCompound(obj, name);
+    function NBTCompound(obj = {}) {
+        if(!(this instanceof NBTCompound)) return new NBTCompound(obj);
         NBTTag.call(this);
-        this.value = obj;
+        this.value = {};
+        for(let property in obj) {
+            if(hasOwn(obj, property)) {
+                this.value[property] = NBTTag.create(null, obj[property]);
+            }
+        }
     }
     NBTCompound.prototype = Object.create(NBTTag.prototype);
     NBTCompound.prototype.keys = function() {
@@ -1610,12 +1788,49 @@
     NBTCompound.prototype.entries = function() {
         return Object.entries(this.value);
     }
+    NBTCompound.prototype.has = function(property) {
+        return Object.prototype.hasOwnProperty.call(this.value, property);
+    }
     NBTCompound.prototype.get = function(property) {
-        if(!Object.prototype.hasOwnProperty.call(this.value, property)) return undefined;
-        return this.value[property];
+        return this.has(property) ? this.value[property] : null;
+    }
+    NBTCompound.prototype.getTyped = function(property, type, listType) {
+        if(!Object.keys(NBTTagType).includes(type)) throw "Invalid NBT tag type: " + type;
+        if(!this.has(property)) return null;
+        let val = this.get(property);
+        if(type === "LIST") {
+            if(!Object.keys(NBTTagType).includes(listType)) throw "Invalid NBTList type: " + listType;
+            let typeStr = "LIST<" + listType + ">";
+            if(val.type !== "LIST") throw `Property "${property}" (${val.type}) is not of type ${typeStr}`;
+            if(val.listType !== listType) throw `Property "${property}" (LIST<${val.listType}>) is not of type ${typeStr}`;
+            return val;
+        }
+        if(val.type !== type) throw `Property "${property}" (${val.type}) is not of type ${type}`;
+        return val;
     }
     NBTCompound.prototype.set = function(property, value) {
         this.value[property] = value;
+    }
+    NBTCompound.prototype.setByte = function(property, value) {
+        this.set(property, new NBTByte(value));
+    }
+    NBTCompound.prototype.setShort = function(property, value) {
+        this.set(property, new NBTShort(value));
+    }
+    NBTCompound.prototype.setInt = function(property, value) {
+        this.set(property, new NBTInt(value));
+    }
+    NBTCompound.prototype.setLong = function(property, value) {
+        this.set(property, new NBTLong(value));
+    }
+    NBTCompound.prototype.setFloat = function(property, value) {
+        this.set(property, new NBTFloat(value));
+    }
+    NBTCompound.prototype.setDouble = function(property, value) {
+        this.set(property, new NBTDouble(value));
+    }
+    NBTCompound.prototype.setString = function(property, value) {
+        this.set(property, new NBTString(value));
     }
     NBTCompound.prototype.toByteStream = function() {
         let bytes = [];
@@ -1666,6 +1881,23 @@
             obj[property] = this.value[property].toJSON();
         }
         return obj;
+    }
+    NBTCompound.prototype.equals = function(other) {
+        if(other instanceof NBTCompound) return other.equals(this.value);
+        for(let property in this.value) {
+            if(hasOwn(this.value, property) && !hasOwn(other, property)) return false;
+        }
+        for(let property in other) {
+            if(hasOwn(other, property) && !hasOwn(this.value, property)) return false;
+        }
+        for(let property in this.value) {
+            if(!hasOwn(this.value, property)) continue;
+            if(!this.value[property].equals(other[property])) {
+                console.log("This value of %s is not equal to the other value of %s", property, property);
+                return false;
+            }
+        }
+        return true;
     }
     NBTCompound.isNBTCompound = function(object) {
         if(object instanceof NBTCompound) return true;
@@ -1801,8 +2033,9 @@
         return root;
     }
 
-    jango.minecraft = {
+    jango.nbt = {
         NBTTagType,
+        NBTTag,
         NBTByte,
         NBTShort,
         NBTInt,
@@ -1819,7 +2052,7 @@
         parseNBTFromByteStream
     };
 
-//#endregion Minecraft
+//#endregion NBT
 
     function ArrayReader(array) {
         if(!(this instanceof ArrayReader)) return new ArrayReader(array);
@@ -1856,6 +2089,19 @@
         }
     }
     jango.ArrayReader = ArrayReader;
+
+    jango.inputFiles = function() {
+        return new Promise(function(resolve, reject) {
+            if(typeof document?.createElement !== "function") reject("Unable to manipulate DOM");
+            let fileIn = document.createElement("input");
+            fileIn.type = "file";
+            fileIn.multiple = true;
+            fileIn.oninput = function(event) {
+                resolve(Array.from(fileIn.files));
+            }
+            fileIn.click();
+        });
+    }
 
     if(typeof module !== "undefined" && typeof module.exports !== "undefined") {
         module.exports = Object.freeze(jango);

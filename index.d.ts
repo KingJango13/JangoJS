@@ -303,7 +303,7 @@ export namespace engineering {
     export function convertPressure(value: number, typeIn: PressureUnit, typeOut: PressureUnit): number;
 }
 
-export namespace minecraft {
+export namespace nbt {
     export const NBTTagType: {
         readonly END: 0;
         readonly BYTE: 1;
@@ -321,13 +321,47 @@ export namespace minecraft {
         readonly SHORT_ARRAY: 13;
     }
     type TagType = keyof typeof NBTTagType | "NONE";
-    interface NBTTag {
-        readonly type: "NONE";
-        value: undefined;
+    
+    interface NBTTag<ValueType = undefined> {
+        readonly type: GetTagType<typeof this>;
+        value: ValueType;
+        equals(other: any): boolean;
+        equalsStrict(other: any): boolean;
         toByteStream(): Uint8Array;
+        toNBT(): any;
+        toNBTString(): string;
+        toJSON(): any;
     }
     
     type NBTType = number | string | NBTTag | number[] | NBTCompoundRaw | NBTListRaw;
+    type GetTagType<T extends NBTTag> = T extends NBTByte ? "BYTE" :
+        T extends NBTShort ? "SHORT" :
+        T extends NBTInt ? "INT" :
+        T extends NBTLong ? "LONG" :
+        T extends NBTFloat ? "FLOAT" :
+        T extends NBTDouble ? "DOUBLE" :
+        T extends NBTByteArray ? "BYTE_ARRAY" :
+        T extends NBTString ? "STRING" :
+        T extends NBTList ? "LIST" :
+        T extends NBTCompound ? "COMPOUND" :
+        T extends NBTIntArray ? "INT_ARRAY" :
+        T extends NBTLongArray ? "LONG_ARRAY" :
+        T extends NBTShortArray ? "SHORT_ARRAY" :
+        "NONE";
+    type ReverseGetTagType<T extends TagType, ListType extends TagType = "NONE"> = T extends "BYTE" ? NBTByte :
+        T extends "SHORT" ? NBTShort :
+        T extends "INT" ? NBTInt :
+        T extends "LONG" ? NBTLong :
+        T extends "FLOAT" ? NBTFloat :
+        T extends "DOUBLE" ? NBTDouble :
+        T extends "BYTE_ARRAY" ? NBTByteArray :
+        T extends "STRING" ? NBTString :
+        T extends "LIST" ? NBTList<ReverseGetTagType<ListType>> :
+        T extends "COMPOUND" ? NBTCompound :
+        T extends "INT_ARRAY" ? NBTIntArray :
+        T extends "LONG_ARRAY" ? NBTLongArray :
+        T extends "SHORT_ARRAY" ? NBTShortArray :
+        NBTTag;
     interface NBTCompoundRaw {
         [property: string]: NBTType;
     }
@@ -341,9 +375,10 @@ export namespace minecraft {
         isValidNBTTag(value: any): boolean;
         getTagTypeForValue(value: any): TagType | never;
         create(type: TagType | null): NBTTag;
+        fromNBT(value: NBTTag | string | number | NBTTag[] | string[] | number[]): NBTTag;
     }
     
-    interface NBTNumberTag extends NBTTag {
+    interface NBTNumberTag extends NBTTag<number> {
         value: number;
         valueOf(): number;
         toString(radix?: number): string;
@@ -424,10 +459,101 @@ export namespace minecraft {
         isDouble(value: any): boolean;
     }
     
-    interface NBTArrayTag<T extends NBTNumberTag> extends NBTTag {
+    interface NBTArrayTag<T extends NBTNumberTag> extends NBTTag<T[]> {
         at(index: number): T;
         set(index: number, value: T): void;
     }
+    type NBTByteArray = NBTArrayTag<NBTByte>;
+
+    interface NBTString extends NBTTag<string> {
+        readonly length: number;
+        charAt(index: number): string;
+        codePointAt(index: number): number;
+        setCharAt(index: number, char: string): void;
+        append(str: string): void;
+        substring(start: number, end?: number): NBTString;
+    }
+    interface NBTStringConstructor {
+        new(str: NBTString | string): NBTString;
+        (str: NBTString | string): NBTString;
+        isString(value: unknown): value is (NBTString | string);
+    }
+
+    interface NBTList<T extends NBTTag> extends NBTTag<T[]> {
+        readonly length: number;
+        value: T[];
+        listType: GetTagType<T>;
+        at(index: number): T;
+        set(index: number, value: T): void;
+        append(value: T): void;
+        [Symbol.iterator](): Iterator<T, undefined>;
+        forEach(f: (value: T, index: number, array: NBTList<T>) => void): void;
+    }
+    interface NBTListConstructor {
+        new (list: number[] | NBTByte[], type: "BYTE" | 1): NBTList<NBTByte>;
+        new (list: number[] | NBTShort[], type: "SHORT" | 2): NBTList<NBTShort>;
+        new (list: number[] | NBTInt[], type: "INT" | 3): NBTList<NBTInt>;
+        new (list: number[] | NBTLong[], type: "LONG" | 4): NBTList<NBTLong>;
+        new (list: number[] | NBTFloat[], type: "FLOAT" | 5): NBTList<NBTFloat>;
+        new (list: number[] | NBTDouble[], type: "DOUBLE" | 6): NBTList<NBTDouble>;
+        new (list: string[] | NBTString[], type: "STRING" | 8): NBTList<NBTString>;
+        new (list: NBTCompoundRaw[] | NBTCompound[], type: "COMPOUND" | 10): NBTList<NBTCompound>;
+        new (list: NBTTag[] | number[] | string[] | NBTCompoundRaw[]): NBTList<GetTagType<typeof list[0]>>;
+        
+        (list: number[] | NBTByte[], type: "BYTE" | 1): NBTList<NBTByte>;
+        (list: number[] | NBTShort[], type: "SHORT" | 2): NBTList<NBTShort>;
+        (list: number[] | NBTInt[], type: "INT" | 3): NBTList<NBTInt>;
+        (list: number[] | NBTLong[], type: "LONG" | 4): NBTList<NBTLong>;
+        (list: number[] | NBTFloat[], type: "FLOAT" | 5): NBTList<NBTFloat>;
+        (list: number[] | NBTDouble[], type: "DOUBLE" | 6): NBTList<NBTDouble>;
+        (list: string[] | NBTString[], type: "STRING" | 8): NBTList<NBTString>;
+        (list: NBTCompoundRaw[] | NBTCompound[], type: "COMPOUND" | 10): NBTList<NBTCompound>;
+        (list: NBTTag[] | number[] | string[] | NBTCompoundRaw[]): NBTList<GetTagType<typeof list[0]>>;
+
+        isNBTList(value: unknown): boolean;
+    }
+
+    interface NBTCompound extends NBTTag<NBTCompoundRaw> {
+        keys(): string[];
+        entries(): [string, NBTTag][];
+        get(key: string): NBTTag | null;
+        getTyped(key: string, type: "BYTE"): NBTByte | null;
+        getTyped(key: string, type: "SHORT"): NBTShort | null;
+        getTyped(key: string, type: "INT"): NBTInt | null;
+        getTyped(key: string, type: "LONG"): NBTLong | null;
+        getTyped(key: string, type: "FLOAT"): NBTFloat | null;
+        getTyped(key: string, type: "DOUBLE"): NBTDouble | null;
+        getTyped(key: string, type: "BYTE_ARRAY"): NBTByteArray | null;
+        getTyped(key: string, type: "STRING"): NBTString | null;
+        getTyped(key: string, type: "LIST", listType: "FLOAT"): NBTList<NBTFloat> | null;
+        getTyped(key: string, type: "LIST", listType: "DOUBLE"): NBTList<NBTDouble> | null;
+        getTyped(key: string, type: "LIST", listType: "STRING"): NBTList<NBTString> | null;
+        getTyped(key: string, type: "LIST", listType: "LIST"): NBTList<NBTList<NBTTag>> | null;
+        getTyped(key: string, type: "LIST", listType: "COMPOUND"): NBTList<NBTCompound> | null;
+        getTyped(key: string, type: "COMPOUND"): NBTCompound | null;
+        getTyped(key: string, type: "INT_ARRAY"): NBTIntArray | null;
+        getTyped(key: string, type: "LONG_ARRAY"): NBTLongArray | null;
+        getTyped(key: string, type: "SHORT_ARRAY"): NBTShortArray | null;
+        set(key: string, value: NBTTag): void;
+        setByte(key: string, value: NBTByte | number): void;
+        setShort(key: string, value: NBTShort | number): void;
+        setInt(key: string, value: NBTInt | number): void;
+        setLong(key: string, value: NBTLong | number): void;
+        setFloat(key: string, value: NBTFloat | number): void;
+        setDouble(key: string, value: NBTDouble | number): void;
+        setString(key: string, value: NBTString | string): void;
+    }
+    interface NBTCompoundConstructor {
+        new(compound: NBTCompound | NBTCompoundRaw): NBTCompound;
+        new(): NBTCompound;
+        (compound: NBTCompound | NBTCompoundRaw): NBTCompound;
+        (): NBTCompound;
+        isNBTCompound(x: unknown): boolean;
+    }
+
+    type NBTIntArray = NBTArrayTag<NBTInt>;
+    type NBTShortArray = NBTArrayTag<NBTShort>;
+    type NBTLongArray = NBTArrayTag<NBTLong>;
     
     export const NBTTag: NBTTagConstructor;
     export const NBTByte: NBTByteConstructor;
@@ -436,6 +562,10 @@ export namespace minecraft {
     export const NBTLong: NBTLongConstructor;
     export const NBTFloat: NBTFloatConstructor;
     export const NBTDouble: NBTDoubleConstructor;
+    export const NBTString: NBTStringConstructor;
+    export const NBTList: NBTListConstructor;
+    export const NBTCompound: NBTCompoundConstructor;
+    export function parseNBTFromByteStream(data: number[]): NBTCompound;
 }
 
 export interface ArrayReader {
@@ -451,3 +581,4 @@ interface ArrayReaderConstructor {
 }
 
 export const ArrayReader: ArrayReaderConstructor;
+export function decompressStream(stream: ReadableStream, method?: "gzip" | "deflate" | "deflate-raw"): number[];
