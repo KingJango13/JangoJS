@@ -568,17 +568,221 @@ export namespace nbt {
     export function parseNBTFromByteStream(data: number[]): NBTCompound;
 }
 
-export interface ArrayReader {
-    readonly length: number;
-    readonly done: boolean;
-    [Symbol.iterator]: Iterator<any, undefined>;
-    read(count?: number): any | any[];
+export namespace io {
+    export interface ArrayReader {
+        readonly length: number;
+        readonly done: boolean;
+        [Symbol.iterator]: Iterator<any, undefined>;
+        read(count?: number): any | any[];
+    }
+
+    interface ArrayReaderConstructor {
+        new(array: any[]): ArrayReader;
+        (array: any[]): ArrayReader;
+    }
+
+    export interface StreamReader {
+        dataView: DataView;
+        position: number;
+        littleEndian: boolean;
+
+        readonly done: boolean;
+        readonly byteLength: number;
+        
+        readUint8(): UInt8;
+        readInt8(): Int8;
+        readUint16(): number;
+        readInt16(): number;
+        readUint32(): number;
+        readInt32(): number;
+        readFloat32(): number;
+        readFloat64(): number;
+        readString(sizeOfLength: number?): string;
+        readBoolean(): boolean;
+    }
+
+    interface StreamReaderConstructor {
+        new(data: ArrayBuffer, littleEndian: boolean?): StreamReader;
+        (data: ArrayBuffer, littleEndian: boolean?): StreamReader;
+    }
+
+    export interface StreamWriter {
+        dataView: DataView;
+        littleEndian: boolean;
+        readonly byteLength: number;
+        
+        writeUint8(num: UInt8): void;
+        writeInt8(num: Int8): void;
+        writeUint16(num: number): void;
+        writeInt16(num: number): void;
+        writeUint32(num: number): void;
+        writeInt32(num: number): void;
+        writeFloat32(num: number): void;
+        writeFloat64(num: number): void;
+        writeString(str: string, sizeOfLength: number?): void;
+        writeBoolean(b: boolean): void;
+
+        toByteArray(): Uint8Array;
+    }
+
+    interface StreamWriterConstructor {
+        new(littleEndian: boolean?): StreamWriter;
+        (littleEndian: boolean?): StreamWriter;
+    }
+
+    export const ArrayReader: ArrayReaderConstructor;
+    export const StreamReader: StreamReaderConstructor;
+    export const StreamWriter: StreamWriterConstructor;
+    export function decompressStream(stream: ReadableStream, method?: "gzip" | "deflate" | "deflate-raw"): Promise<number[]>;
+    export function inputFiles(): Promise<File[]>;
 }
 
-interface ArrayReaderConstructor {
-    new(array: any[]): ArrayReader;
-    (array: any[]): ArrayReader;
-}
+export namespace terraria {
+    export namespace itemModifiers {
+        export function getID(modifierName: string): number | null;
+        export function getName(modifierID: number): string | null;
+        export function constructFromNBT(nbt: nbt.NBTCompound): string | null;
+    }
+    export namespace itemIDs {
+        export function getByID(itemID: number): string | null;
+        export function getByDisplayName(displayName: string): string | null;
+        export function constructFromNBT(nbt: nbt.NBTCompound): string;
+    }
+    export namespace buffIDs {
+        export function getID(internalName: string): number | null;
+        export function getDisplayName(buffID: number): string | null;
+        export function getDisplayName(internalName: string): string | null;
+        export function getInternalName(buffID: number): string | null;
+        export function constructFromNBT(nbt: nbt.NBTCompound): string;
+    }
 
-export const ArrayReader: ArrayReaderConstructor;
-export function decompressStream(stream: ReadableStream, method?: "gzip" | "deflate" | "deflate-raw"): number[];
+    declare class Buff {
+        static getMaxTime(invVersion: number): 1999999980 | 1080000;
+        constructor(id: number, time: number);
+
+        id: number;
+        displayName: string | null;
+        internalName: string | null;
+        time: number;
+
+        static read(reader: io.StreamReader): Buff;
+        write(writer: io.StreamWriter): void;
+
+        toJSON(): {
+            id: number;
+            displayName: string | null;
+            internalName: string | null;
+            time: number;
+        };
+    }
+
+    interface JSONItemModifier {
+        id: number;
+        name: string | null;
+    }
+    declare class ItemModifier {
+        id: number;
+        name: string | null;
+        constructor(id: number);
+        toJSON(): JSONItemModifier;
+    }
+
+    interface JSONTerrariaItem {
+        id: number;
+        name: string | null;
+        count: number;
+        modifier: JSONItemModifier;
+    }
+    declare class TerrariaItem {
+        id: number;
+        name: string | null;
+        count: number;
+        modifier: ItemModifier;
+
+        constructor(id: number?, count: number?, modifierID: number?);
+
+        load(reader: io.StreamReader, multi: boolean): TerrariaItem;
+        save(writer: io.StreamWriter, multi: boolean): void;
+
+        isEmpty(): boolean;
+        copy(): TerrariaItem;
+
+        toJSON(): JSONTerrariaItem;
+    }
+
+    declare class Color {
+        red: UInt8;
+        green: UInt8;
+        blue: UInt8;
+
+        constructor(red: UInt8, green: UInt8, blue: UInt8);
+        
+        static read(reader: io.StreamReader): Color;
+        static fromInt(i: number): Color;
+
+        toString(): string;
+        static fromString(str: string): Color;
+
+        toJSON(): string;
+        write(writer: io.StreamWriter): void;
+    }
+
+    interface JSONSlot {
+        isFavorited: boolean;
+        favFlagMinVersion: number;
+        multi: boolean;
+        item: JSONTerrariaItem;
+    }
+    declare class Slot {
+        static defaultAvailable(player: TerrariaPlayer): boolean;
+
+        isFavorited: boolean;
+        favFlagMinVersion: number;
+        multi: boolean;
+        item: TerrariaItem;
+
+        constructor();
+        static createSlots(count: number, slotInitializer: (index: number, slot: Slot) => void): Slot[];
+        
+        clear(): void;
+        isValid(): boolean;
+
+        handle(player: TerrariaPlayer, stream: io.StreamReader | io.StreamWriter, invVersion: number, shouldWrite: boolean): void;
+        load(reader: io.StreamReader): Slot;
+        save(writer: io.StreamWriter): void;
+        toJSON(): JSONSlot;
+    }
+
+    interface JSONArmorLoadout {
+        hide: boolean[];
+        primary: boolean;
+        items: JSONSlot[];
+        social: JSONSlot[];
+        dyes: JSONSlot[];
+    }
+    declare class ArmorLoadout {
+        static extraAccessoryAvailable(player: TerrariaPlayer): boolean;
+        static socialAccessoryOrDyeAvailable(player: TerrariaPlayer): boolean;
+        static masterAccessoryOrDyeAvailable(player: TerrariaPlayer): boolean;
+        static extraAccessoryAvailableAlt(player: TerrariaPlayer): boolean;
+        static socialAccessoryOrDyeAvailableAlt(player: TerrariaPlayer): boolean;
+        static masterAccessoryOrDyeAvailableAlt(player: TerrariaPlayer): boolean;
+        static altLoadoutAvailable(player: TerrariaPlayer): boolean;
+
+        hide: boolean[];
+        primary: boolean;
+        items: Slot[];
+        social: Slot[];
+        dyes: Slot[];
+        constructor(index: number);
+
+        clear(): void;
+        setTo(other: ArmorLoadout): void;
+
+        handle(player: TerrariaPlayer, stream: io.StreamReader | io.StreamWriter, invVersion: number, shouldWrite: boolean): void;
+        toJSON(): JSONArmorLoadout;
+    }
+
+    interface JSONTerrariaPlayer {}
+    declare class TerrariaPlayer {}
+}

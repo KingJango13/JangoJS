@@ -1,0 +1,21 @@
+{
+  "name": "jango-js",
+  "version": "1.0.0",
+  "description": "An API with various features, such as string and math utils, as well as an NBT framework.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/KingJango13/JangoJS.git"
+  },
+  "keywords": [],
+  "author": "King_Jango_13",
+  "license": "ISC",
+  "types": "./index.d.ts",
+  "bugs": {
+    "url": "https://github.com/KingJango13/JangoJS/issues"
+  },
+  "homepage": "https://github.com/KingJango13/JangoJS#readme"
+}
