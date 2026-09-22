@@ -184,6 +184,42 @@
         }
     };
 
+    function Counter(initialData = null) {
+        if(!(this instanceof Counter)) return new Counter(initialData);
+        if(Array.isArray(initialData)) {
+            for(let item of initialData) {
+                this.add(item);
+            }
+        } else if(typeof initialData === "object") {
+            for(let prop in initialData) {
+                if (hasOwn(initialData, prop)) {
+                    this[prop] = initialData[prop];
+                }
+            }
+        }
+    }
+
+    Counter.prototype = {
+        add(key, amount = 1) {
+            if(typeof this[key] !== "number") {
+                this[key] = amount;
+            } else {
+                this[key] += amount;
+            }
+            return this[key];
+        },
+        subtract(key, amount) {
+            return this.add(key, -amount);
+        },
+        *[Symbol.iterator]() {
+            for(let prop in this) {
+                if(hasOwn(this, prop)) {
+                    yield {key: prop, count: this[prop]};
+                }
+            }
+        }
+    };
+
     jango.object = {
         hasOwn,
         Tuple,
@@ -191,7 +227,8 @@
         CallableObject,
         areSamePrototype,
         objectEquals,
-        Stack
+        Stack,
+        Counter
     };
 
 //#endregion Objects
@@ -2072,6 +2109,7 @@
         if(!NBTIntArray.isIntArray(array)) throw "NBTIntArray must be constructed from an array of 32 bit signed integers";
         NBTArrayTag.call(this, array);
     }
+    NBTIntArray.prototype = Object.create(NBTArrayTag.prototype);
     NBTIntArray.isIntArray = function(array) {
         if(array instanceof NBTIntArray) return true;
         if(!Array.isArray(array)) return false;
@@ -2085,6 +2123,7 @@
         if(!NBTLongArray.isLongArray(array)) throw "NBTLongArray must be constructed from an array of 64 bit signed integers";
         NBTArrayTag.call(this, array);
     }
+    NBTLongArray.prototype = Object.create(NBTArrayTag.prototype);
     NBTLongArray.isLongArray = function(array) {
         if(array instanceof NBTLongArray) return true;
         if(!Array.isArray(array)) return false;
@@ -2098,6 +2137,7 @@
         if(!NBTShortArray.isShortArray(array)) throw "NBTShortArray must be constructed from an array of 16 bit signed integers";
         NBTArrayTag.call(this, array);
     }
+    NBTShortArray.prototype = Object.create(NBTArrayTag.prototype);
     NBTShortArray.isShortArray = function(array) {
         if(array instanceof NBTShortArray) return true;
         if(!Array.isArray(array)) return false;
@@ -2141,7 +2181,7 @@
             let arrayLen = readInt();
             let chunk = readSizedChunk(arrayLen * intSize);
             for(let i = 0; i < chunk.byteLength; i++) {
-                array.push(chunk["get" + (intSize === 8 ? "Big" : "") + "Int" + (intSize * 8).toString()]);
+                array.push(chunk["get" + (intSize === 8 ? "Big" : "") + "Int" + (intSize * 8).toString()]());
             }
             return array;
         }
