@@ -80,6 +80,30 @@ var jango;
             [Symbol.toStringTag] = "Enum";
         }
         objects.Enum = Enum;
+        function makeCallable(instance, method) {
+            const target = (...args) => method(...args);
+            Object.setPrototypeOf(target, Object.getPrototypeOf(instance));
+            Object.assign(target, instance);
+            return new Proxy(target, {
+                apply(_target, _thisArg, args) {
+                    return method(...args);
+                }
+            });
+        }
+        objects.makeCallable = makeCallable;
+        function makeIndexable(instance, indexer) {
+            return new Proxy(instance, {
+                get(target, p, receiver) {
+                    if (Number.isInteger(Number(p)))
+                        return indexer(Number(p));
+                    const value = Reflect.get(instance, p, instance);
+                    if (typeof value === "function")
+                        return value.bind(instance);
+                    return value;
+                }
+            });
+        }
+        objects.makeIndexable = makeIndexable;
         class CallableObject {
             func;
             constructor(a) {
@@ -89,11 +113,6 @@ var jango;
                     return this;
                 }
                 this.func = a;
-                return new Proxy(this, {
-                    apply(target, thisArg, argArray) {
-                        return target.func.call(thisArg, argArray);
-                    },
-                });
             }
             call(thisArg, ...args) {
                 return this.func.call(thisArg, args);
@@ -106,6 +125,12 @@ var jango;
             }
             get [Symbol.toStringTag]() {
                 return "CallableObject";
+            }
+            asCallable() {
+                return makeCallable(this, (...args) => this.func(...args));
+            }
+            static creatInstancee(func) {
+                return (new CallableObject(func)).asCallable();
             }
         }
         objects.CallableObject = CallableObject;
@@ -292,15 +317,44 @@ var jango;
         }
         math.lcm = lcm;
         function factorial(x) {
-            if (x < 2)
-                return 1;
-            var y = 1;
-            for (var i = 2; i <= x; i++) {
-                y *= i;
+            const coefs = [1, -0.577215664902, 1.97811199066, -5.44487445649, 23.561474084, -117.839408268,
+                715.067362527, -5019.84887263, 40243.6215733, -362526.289115];
+            if (Number.isInteger(x)) {
+                if (x < 0)
+                    throw "The factorial of negative integers is undefined";
+                if (x < 2)
+                    return 1;
+                let ret = 1;
+                for (let i = 2; i <= x; i++) {
+                    ret *= i;
+                }
+                return ret;
             }
-            return y;
+            if (Math.abs(x) <= 0.5) {
+                let ret = 0;
+                for (let i = 0; i < coefs.length; i++) {
+                    ret += coefs[i] * Math.pow(x, i) / factorial(i);
+                }
+                return ret;
+            }
+            if (x > 0) {
+                if (x < 1) {
+                    return Math.sqrt(Math.PI) * x * factorial((x - 1) * 2) / (Math.pow(4, x - 1) * factorial(x - 1.5));
+                }
+                let n = Math.floor(x);
+                let ret = 1;
+                for (let i = 0; i < n; i++) {
+                    ret *= x - i;
+                }
+                return ret * factorial(x - n);
+            }
+            return factorial(x + 1) / (x + 1);
         }
         math.factorial = factorial;
+        function gamma(x) {
+            return factorial(x - 1);
+        }
+        math.gamma = gamma;
         function mean(...data) {
             return data.reduce((x, y) => x + y) / data.length;
         }
@@ -733,6 +787,9 @@ var jango;
             get [Symbol.toStringTag]() {
                 return "LinearEquation";
             }
+            static create(slope, yIntercept) {
+                return (new LinearEquation(slope, yIntercept)).asCallable();
+            }
         }
         math.LinearEquation = LinearEquation;
         class ParabolicEquation extends objects.CallableObject {
@@ -957,6 +1014,7 @@ var jango;
             }
             return ret * subIntervalSize;
         }
+        math.trapezoidalIntegrate = trapezoidalIntegrate;
         function simpsonIntegrate(func, min, max, subIntervalCt) {
             let subIntervalSize = (max - min) / subIntervalCt;
             let ret = func(min) + func(max);
@@ -965,6 +1023,7 @@ var jango;
             }
             return ret * subIntervalSize / 3;
         }
+        math.simpsonIntegrate = simpsonIntegrate;
         /*
         Operation format:
         Null Token:                         NULL
@@ -987,6 +1046,7 @@ var jango;
         function pctError(actual, expected) {
             return Math.abs((actual / expected) - 1) * 100;
         }
+        math.pctError = pctError;
         function numberArray(length) {
             return new Array(length).fill(0);
         }
@@ -1005,33 +1065,25 @@ var jango;
             constructor(a = 1, columns = 1) {
                 if (a instanceof Matrix) {
                     this.#data = copy2DArray(a.#data);
+                    return this;
                 }
-                else if (is2DArray(a)) {
+                if (is2DArray(a)) {
                     this.#data = copy2DArray(a);
+                    return this;
                 }
-                else {
-                    this.#data = [];
-                    if (Array.isArray(a)) {
-                        validateMatrixDimension(columns);
-                        for (let i = 0; i < a.length; i += columns) {
-                            this.#data.push(a.slice(i, i + columns));
-                        }
+                this.#data = [];
+                if (Array.isArray(a)) {
+                    validateMatrixDimension(columns);
+                    for (let i = 0; i < a.length; i += columns) {
+                        this.#data.push(a.slice(i, i + columns));
                     }
-                    else {
-                        validateMatrixDimension(a);
-                        validateMatrixDimension(columns);
-                        for (let i = 0; i < a; i++) {
-                            this.#data.push(numberArray(columns));
-                        }
-                    }
+                    return this;
                 }
-                return new Proxy(this, {
-                    get(target, p, receiver) {
-                        if (Number.isInteger(p))
-                            return target.#data[p];
-                        return Reflect.get(target, p, receiver);
-                    }
-                });
+                validateMatrixDimension(a);
+                validateMatrixDimension(columns);
+                for (let i = 0; i < a; i++) {
+                    this.#data.push(numberArray(columns));
+                }
             }
             static identity(n) {
                 return new Matrix(n, n).mapCells(function (value, row, column) {
@@ -1071,14 +1123,14 @@ var jango;
                 if (this.rows !== other.rows || this.columns !== other.columns)
                     throw "Matrix addition is only supported for matrices of the same dimensions";
                 return this.mapCells(function (value, row, column) {
-                    return value + other[row][column];
+                    return value + other.#data[row][column];
                 });
             }
             subtract(other) {
                 if (this.rows !== other.rows || this.columns !== other.columns)
                     throw "Matrix subtraction is only supported for matrices of the same dimensions";
                 return this.mapCells(function (value, row, column) {
-                    return value - other[row][column];
+                    return value - other.#data[row][column];
                 });
             }
             multiply(a) {
@@ -1090,7 +1142,7 @@ var jango;
                 return new Matrix(this.rows, a.columns).mapCells(function (value, row, column) {
                     let sum = 0;
                     for (let i = 0; i < a.rows; i++) {
-                        sum += m[row][i] * a[i][row];
+                        sum += m.#data[row][i] * a.#data[i][row];
                     }
                     return sum;
                 });
@@ -1157,27 +1209,27 @@ var jango;
                 let augmented = new Matrix(n, n * 2);
                 for (let i = 0; i < n; i++) {
                     for (let j = 0; j < n; j++) {
-                        augmented[i][j] = this.#data[i][j];
-                        augmented[i][j + n] = i === j ? 1 : 0;
+                        augmented.#data[i][j] = this.#data[i][j];
+                        augmented.#data[i][j + n] = i === j ? 1 : 0;
                     }
                 }
                 augmented.gaussianEliminate();
                 for (let i = n - 1; i > -1; i--) {
-                    let pivot = augmented[i][i];
+                    let pivot = augmented.#data[i][i];
                     if (Math.abs(pivot) < 1e-10)
                         return null;
                     for (let j = 0; j < augmented.columns; j++) {
-                        augmented[i][j] /= pivot;
+                        augmented.#data[i][j] /= pivot;
                     }
                     for (let j = i - 1; j > -1; j--) {
-                        let f = augmented[j][i];
+                        let f = augmented.#data[j][i];
                         for (let k = 0; k < augmented.columns; k++) {
-                            augmented[j][k] -= f * augmented[i][k];
+                            augmented.#data[j][k] -= f * augmented.#data[i][k];
                         }
                     }
                 }
                 return new Matrix(n, n).mapCells(function (value, row, column) {
-                    return augmented[row][column + n];
+                    return augmented.#data[row][column + n];
                 });
             }
             minor(excludedRow, excludedColumn) {
@@ -1208,7 +1260,7 @@ var jango;
                             colShift = 1;
                             continue;
                         }
-                        ret[row][col] = this.#data[row + rowShift][col + colShift];
+                        ret.#data[row][col] = this.#data[row + rowShift][col + colShift];
                     }
                 }
                 return ret;
@@ -1229,6 +1281,9 @@ var jango;
             }
             get [Symbol.toStringTag]() {
                 return "Matrix";
+            }
+            asIndexable() {
+                return objects.makeIndexable(this, i => this.#data[i]);
             }
         }
         math.Matrix = Matrix;
@@ -1929,13 +1984,6 @@ var jango;
                 if (Array.isArray(value)) {
                     this.value = value.map(x => x.copy());
                 }
-                return new Proxy(this, {
-                    get(target, p, receiver) {
-                        if (Number.isInteger(p))
-                            return target.value[Number(p)];
-                        return Reflect.get(target, p, receiver);
-                    }
-                });
             }
             get length() {
                 return this.value.length;
@@ -1968,7 +2016,7 @@ var jango;
                 if (this.length !== other.length)
                     return false;
                 for (let i = 0; i < this.length; i++) {
-                    if (!this.value[i].equalsStrict(other[i]))
+                    if (!this.value[i].equalsStrict(other.value[i]))
                         return false;
                 }
                 return true;
@@ -1977,10 +2025,13 @@ var jango;
                 if (this.length !== other.length)
                     return false;
                 for (let i = 0; i < this.length; i++) {
-                    if (!this.value[i].equalsStrict(other[i]))
+                    if (!this.value[i].equalsStrict(other.value[i]))
                         return false;
                 }
                 return true;
+            }
+            makeIndexable() {
+                return objects.makeIndexable(this, i => this.value[i]);
             }
             static isIntegerArray(array) {
                 if (array instanceof NBTArrayTag)
@@ -2007,6 +2058,13 @@ var jango;
                 super(NBTTagType.BYTE_ARRAY, value);
             }
             static isByteArray(array) {
+                if (array instanceof NBTArrayTag) {
+                    for (let i = 0; i < array.length; i++) {
+                        if (!NBTByte.isByte(array.value[i]))
+                            return false;
+                    }
+                    return true;
+                }
                 if (!NBTArrayTag.isIntegerArray(array))
                     return false;
                 for (let i = 0; i < array.length; i++) {
@@ -2156,6 +2214,9 @@ var jango;
             }
             toJSON() {
                 return this.value.map(x => x.toJSON());
+            }
+            makeIndexable() {
+                return objects.makeIndexable(this, i => this.value[i]);
             }
             static isNBTList(list) {
                 if (list instanceof NBTList)
@@ -2393,6 +2454,13 @@ var jango;
                 super(NBTTagType.INT_ARRAY, value);
             }
             static isIntArray(array) {
+                if (array instanceof NBTArrayTag) {
+                    for (let i = 0; i < array.length; i++) {
+                        if (!NBTInt.isInt(array.value[i]))
+                            return false;
+                    }
+                    return true;
+                }
                 if (!NBTArrayTag.isIntegerArray(array))
                     return false;
                 for (let i = 0; i < array.length; i++) {
@@ -2431,6 +2499,13 @@ var jango;
                 super(NBTTagType.SHORT_ARRAY, value);
             }
             static isShortArray(array) {
+                if (array instanceof NBTArrayTag) {
+                    for (let i = 0; i < array.length; i++) {
+                        if (!NBTShort.isShort(array.value[i]))
+                            return false;
+                    }
+                    return true;
+                }
                 if (!NBTArrayTag.isIntegerArray(array))
                     return false;
                 for (let i = 0; i < array.length; i++) {

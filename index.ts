@@ -87,8 +87,30 @@ namespace jango {
             readonly [Symbol.toStringTag] = "Enum";
         }
 
-        export interface CallableObject<F extends (...args: any) => any> {
-            (...args: Parameters<F>): ReturnType<F>;
+        type CallableInstance<T, Args extends any[], R> = T & ((...args: Args) => R);
+
+        export function makeCallable<T extends object, Args extends any[], R>(instance: T, method: (...args: Args) => R): CallableInstance<T, Args, R> {
+            const target = (...args: Args): R => method(...args);
+            Object.setPrototypeOf(target, Object.getPrototypeOf(instance));
+            Object.assign(target, instance);
+
+            return new Proxy(target, {
+                apply(_target, _thisArg, args: Args) {
+                    return method(...args);
+                }
+            }) as CallableInstance<T, Args, R>;
+        }
+
+        type IndexableInstance<T, R> = T & ((index: number) => R);
+        export function makeIndexable<T extends object, R>(instance: T, indexer: (index: number) => R): IndexableInstance<T, R> {
+            return new Proxy(instance, {
+                get(target, p, receiver) {
+                    if(Number.isInteger(Number(p))) return indexer(Number(p));
+                    const value = Reflect.get(instance, p, instance);
+                    if(typeof value === "function") return value.bind(instance);
+                    return value;
+                }
+            }) as IndexableInstance<T, R>;
         }
 
         export class CallableObject<F extends (...args: any) => any> {
@@ -96,19 +118,13 @@ namespace jango {
 
             constructor(func: F);
             constructor(obj: CallableObject<F>);
-            constructor(a: CallableObject<F>) {
+            constructor(a: CallableObject<F> | F) {
                 if(a instanceof CallableObject) {
                     this.func = a.func;
                     Object.assign(this, a);
                     return this;
                 }
-                this.func = a;
-
-                return new Proxy(this, {
-                    apply(target, thisArg, argArray) {
-                        return target.func.call(thisArg, argArray);
-                    },
-                })
+                this.func = a as F;
             }
             call(thisArg: any, ...args: Parameters<F>): ReturnType<F> {
                 return this.func.call(thisArg, args);
@@ -122,6 +138,14 @@ namespace jango {
 
             get [Symbol.toStringTag]() {
                 return "CallableObject";
+            }
+
+            asCallable(): CallableInstance<this, Parameters<F>, ReturnType<F>> {
+                return makeCallable(this, (...args) => this.func(...args))
+            }
+
+            static creatInstancee<G extends (...args: any) => any>(func: G) {
+                return (new CallableObject(func)).asCallable();
             }
         }
 
@@ -319,13 +343,40 @@ namespace jango {
             return (a * b) / gcd(a, b);
         }
 
-        export function factorial(x: number) {
-            if(x < 2)return 1;
-            var y = 1;
-            for(var i = 2; i <= x; i++) {
-                y *= i;
+        export function factorial(x: number): number {
+            const coefs = [1, -0.577215664902, 1.97811199066, -5.44487445649, 23.561474084, -117.839408268,
+                715.067362527, -5019.84887263, 40243.6215733, -362526.289115];
+            if(Number.isInteger(x)) {
+                if(x < 0) throw "The factorial of negative integers is undefined";
+                if(x < 2) return 1;
+                let ret = 1;
+                for(let i = 2; i <= x; i++) {
+                    ret *= i;
+                }
+                return ret;
             }
-            return y;
+            if(Math.abs(x) <= 0.5) {
+                let ret = 0;
+                for(let i = 0; i < coefs.length; i++) {
+                    ret += coefs[i] * Math.pow(x, i) / factorial(i);
+                }
+                return ret;
+            }
+            if(x > 0) {
+                if(x < 1) {
+                    return Math.sqrt(Math.PI) * x * factorial((x - 1) * 2) / (Math.pow(4, x - 1) * factorial(x - 1.5));
+                }
+                let n = Math.floor(x);
+                let ret = 1;
+                for(let i = 0; i < n; i++) {
+                    ret *= x - i;
+                }
+                return ret * factorial(x - n);
+            }
+            return factorial(x + 1) / (x + 1);
+        }
+        export function gamma(x: number) {
+            return factorial(x - 1);
         }
 
         export function mean(...data: number[]) {
@@ -768,6 +819,10 @@ namespace jango {
             get [Symbol.toStringTag]() {
                 return "LinearEquation";
             }
+
+            static create(slope: number, yIntercept: number) {
+                return (new LinearEquation(slope, yIntercept)).asCallable();
+            }
         }
 
         type Axis = "x" | "y";
@@ -1006,7 +1061,7 @@ namespace jango {
             return riemannSum(func, min, max, subIntervalCt, "RIGHT");
         }
 
-        function trapezoidalIntegrate(func: (x: number) => number, min: number, max: number, subIntervalCt: number) {
+        export function trapezoidalIntegrate(func: (x: number) => number, min: number, max: number, subIntervalCt: number) {
             let subIntervalSize = (max - min) / subIntervalCt;
             let ret = (func(min) + func(max)) / 2;
             for(let i = 1; i < subIntervalCt; i++) {
@@ -1015,7 +1070,7 @@ namespace jango {
             return ret * subIntervalSize;
         }
 
-        function simpsonIntegrate(func: (x: number) => number, min: number, max: number, subIntervalCt: number) {
+        export function simpsonIntegrate(func: (x: number) => number, min: number, max: number, subIntervalCt: number) {
             let subIntervalSize = (max - min) / subIntervalCt;
             let ret = func(min) + func(max);
             for(let i = 1; i < subIntervalCt; i++) {
@@ -1044,7 +1099,7 @@ namespace jango {
         Special Function:                   SPCF ID ARG0 ARG1 ... ARGN  (Defined for the interpreter at runtime)
         */
 
-        function pctError(actual: number, expected: number) {
+        export function pctError(actual: number, expected: number) {
             return Math.abs((actual / expected) - 1) * 100;
         }
 
@@ -1066,7 +1121,7 @@ namespace jango {
 
         export class Matrix {
             #data: number[][];
-            [rowIndex: number]: number[];
+            //[rowIndex: number]: number[];
             constructor(other: Matrix);
             constructor(data: number[][]);
             constructor(flatData: number[], columns: number);
@@ -1074,29 +1129,25 @@ namespace jango {
             constructor(a: Matrix | number[][] | number[] | number = 1, columns = 1) {
                 if(a instanceof Matrix) {
                     this.#data = copy2DArray(a.#data);
-                } else if(is2DArray(a)) {
-                    this.#data = copy2DArray(a);
-                } else {
-                    this.#data = [];
-                    if(Array.isArray(a)) {
-                        validateMatrixDimension(columns);
-                        for(let i = 0; i < a.length; i += columns) {
-                            this.#data.push(a.slice(i, i + columns));
-                        }
-                    } else {
-                        validateMatrixDimension(a);
-                        validateMatrixDimension(columns);
-                        for(let i = 0; i < a; i++) {
-                            this.#data.push(numberArray(columns));
-                        }
-                    }
+                    return this;
                 }
-                return new Proxy(this, {
-                    get(target, p, receiver) {
-                        if(Number.isInteger(p)) return target.#data[p as unknown as number];
-                        return Reflect.get(target, p, receiver);
+                if(is2DArray(a)) {
+                    this.#data = copy2DArray(a);
+                    return this;
+                }
+                this.#data = [];
+                if(Array.isArray(a)) {
+                    validateMatrixDimension(columns);
+                    for(let i = 0; i < a.length; i += columns) {
+                        this.#data.push(a.slice(i, i + columns));
                     }
-                })
+                    return this;
+                }
+                validateMatrixDimension(a);
+                validateMatrixDimension(columns);
+                for(let i = 0; i < a; i++) {
+                    this.#data.push(numberArray(columns));
+                }
             }
 
             static identity(n: number) {
@@ -1140,14 +1191,14 @@ namespace jango {
                 if(this.rows !== other.rows || this.columns !== other.columns)
                     throw "Matrix addition is only supported for matrices of the same dimensions";
                 return this.mapCells(function(value, row, column) {
-                    return value + other[row][column];
+                    return value + other.#data[row][column];
                 });
             }
             subtract(other: Matrix) {
                 if(this.rows !== other.rows || this.columns !== other.columns)
                     throw "Matrix subtraction is only supported for matrices of the same dimensions";
                 return this.mapCells(function(value, row, column) {
-                    return value - other[row][column];
+                    return value - other.#data[row][column];
                 });
             }
             // Multiplies all cells in the current matrix by c
@@ -1163,7 +1214,7 @@ namespace jango {
                 return new Matrix(this.rows, a.columns).mapCells(function(value, row, column) {
                     let sum = 0;
                     for(let i = 0; i < a.rows; i++) {
-                        sum += m[row][i] * a[i][row];
+                        sum += m.#data[row][i] * a.#data[i][row];
                     }
                     return sum;
                 });
@@ -1229,26 +1280,26 @@ namespace jango {
                 let augmented = new Matrix(n, n * 2);
                 for(let i = 0; i < n; i++) {
                     for(let j = 0; j < n; j++) {
-                        augmented[i][j] = this.#data[i][j];
-                        augmented[i][j + n] = i === j ? 1 : 0;
+                        augmented.#data[i][j] = this.#data[i][j];
+                        augmented.#data[i][j + n] = i === j ? 1 : 0;
                     }
                 }
                 augmented.gaussianEliminate();
                 for(let i = n - 1; i > -1; i--) {
-                    let pivot = augmented[i][i];
+                    let pivot = augmented.#data[i][i];
                     if(Math.abs(pivot) < 1e-10) return null;
                     for(let j = 0; j < augmented.columns; j++) {
-                        augmented[i][j] /= pivot;
+                        augmented.#data[i][j] /= pivot;
                     }
                     for(let j = i - 1; j > -1; j--) {
-                        let f = augmented[j][i];
+                        let f = augmented.#data[j][i];
                         for(let k = 0; k < augmented.columns; k++) {
-                            augmented[j][k] -= f * augmented[i][k];
+                            augmented.#data[j][k] -= f * augmented.#data[i][k];
                         }
                     }
                 }
                 return new Matrix(n, n).mapCells(function(value, row, column) {
-                    return augmented[row][column + n];
+                    return augmented.#data[row][column + n];
                 });
             }
 
@@ -1277,7 +1328,7 @@ namespace jango {
                             colShift = 1;
                             continue;
                         }
-                        ret[row][col] = this.#data[row + rowShift][col + colShift];
+                        ret.#data[row][col] = this.#data[row + rowShift][col + colShift];
                     }
                 }
                 return ret;
@@ -1301,6 +1352,10 @@ namespace jango {
             }
             get [Symbol.toStringTag]() {
                 return "Matrix";
+            }
+            
+            asIndexable() {
+                return objects.makeIndexable(this, i => this.#data[i]);
             }
         }
     }
@@ -1992,8 +2047,6 @@ namespace jango {
         class NBTArrayTag<T extends NBTNumberTag<number | bigint>> extends NBTTag<T[]> {
             value: T[];
 
-            [index: number]: T;
-
             constructor(type: NBTTagType, value?: T[] | NBTArrayTag<T>) {
                 super(type);
                 this.value = [];
@@ -2003,12 +2056,6 @@ namespace jango {
                 if(Array.isArray(value)) {
                     this.value = value.map(x => x.copy());
                 }
-                return new Proxy(this, {
-                    get(target, p, receiver) {
-                        if(Number.isInteger(p)) return target.value[Number(p)];
-                        return Reflect.get(target, p, receiver);
-                    }
-                });
             }
 
             get length() {
@@ -2043,16 +2090,20 @@ namespace jango {
             equals(other: NBTArrayTag<T>) {
                 if(this.length !== other.length) return false;
                 for(let i = 0; i < this.length; i++) {
-                    if(!this.value[i].equalsStrict(other[i])) return false;
+                    if(!this.value[i].equalsStrict(other.value[i])) return false;
                 }
                 return true;
             }
             equalsStrict(other: NBTArrayTag<T>) {
                 if(this.length !== other.length) return false;
                 for(let i = 0; i < this.length; i++) {
-                    if(!this.value[i].equalsStrict(other[i])) return false;
+                    if(!this.value[i].equalsStrict(other.value[i])) return false;
                 }
                 return true;
+            }
+
+            makeIndexable() {
+                return objects.makeIndexable(this, i => this.value[i]);
             }
 
             static isIntegerArray(array: NBTArrayTag<any> | number[]) {
@@ -2076,6 +2127,12 @@ namespace jango {
                 super(NBTTagType.BYTE_ARRAY, value as (NBTByteArray | NBTByte[] | undefined));
             }
             static isByteArray(array: NBTArrayTag<any> | number[]) {
+                if(array instanceof NBTArrayTag) {
+                    for(let i = 0; i < array.length; i++) {
+                        if(!NBTByte.isByte(array.value[i])) return false;
+                    }
+                    return true;
+                }
                 if(!NBTArrayTag.isIntegerArray(array)) return false;
                 for(let i = 0; i < array.length; i++) {
                     if(!NBTByte.isByte(array[i])) return false;
@@ -2149,7 +2206,6 @@ namespace jango {
         export class NBTList<T extends NBTTag<any>> extends NBTTag<T[]> {
             value: T[];
             readonly listType: NBTTagType;
-            [index: number]: T;
 
             constructor(list: NBTList<T> | T[], type?: NBTTagType) {
                 if(!NBTList.isNBTList(list)) throw "NBTList must be constructed from a list of 1 type of NBTTag";
@@ -2222,6 +2278,10 @@ namespace jango {
             }
             toJSON() {
                 return this.value.map(x => x.toJSON());
+            }
+
+            makeIndexable() {
+                return objects.makeIndexable(this, i => this.value[i]);
             }
 
             static isNBTList<U extends NBTTag<any>>(list: NBTList<U> | any[]) {
@@ -2451,6 +2511,12 @@ namespace jango {
                 super(NBTTagType.INT_ARRAY, value as (NBTIntArray | NBTInt[] | undefined));
             }
             static isIntArray(array: NBTArrayTag<any> | number[]) {
+                if(array instanceof NBTArrayTag) {
+                    for(let i = 0; i < array.length; i++) {
+                        if(!NBTInt.isInt(array.value[i])) return false;
+                    }
+                    return true;
+                }
                 if(!NBTArrayTag.isIntegerArray(array)) return false;
                 for(let i = 0; i < array.length; i++) {
                     if(!NBTInt.isInt(array[i])) return false;
@@ -2482,6 +2548,12 @@ namespace jango {
                 super(NBTTagType.SHORT_ARRAY, value as (NBTShortArray | NBTShort[] | undefined));
             }
             static isShortArray(array: NBTArrayTag<any> | number[]) {
+                if(array instanceof NBTArrayTag) {
+                    for(let i = 0; i < array.length; i++) {
+                        if(!NBTShort.isShort(array.value[i])) return false;
+                    }
+                    return true;
+                }
                 if(!NBTArrayTag.isIntegerArray(array)) return false;
                 for(let i = 0; i < array.length; i++) {
                     if(!NBTShort.isShort(array[i])) return false;
